@@ -8,7 +8,14 @@
 #import "DBusMenuShortcutParser.h"
 #import <X11/Xlib.h>
 #import <X11/keysym.h>
+/* MENU_HAVE_LIBINTL is 0 when GNUmakefile found no libintl (NextBSD's base
+   has none); GTK's key names are then known in English only. */
+#ifndef MENU_HAVE_LIBINTL
+#define MENU_HAVE_LIBINTL 1
+#endif
+#if MENU_HAVE_LIBINTL
 #include <libintl.h>
+#endif
 #include <locale.h>
 
 /* Keysym ranges used to classify numeric shortcut values sent by
@@ -322,6 +329,10 @@ static char const * const gtk_text_domains[] = { "gtk40", "gtk30", "gtk20" };
  * covers every language GTK ships rather than a table maintained here. */
 + (NSDictionary *)localizedGTKKeyNames
 {
+#if !MENU_HAVE_LIBINTL
+    /* No gettext to read GTK's catalogue with. */
+    return [NSDictionary dictionary];
+#else
     static NSDictionary *names = nil;
     static NSString *builtForLocale = nil;
 
@@ -370,6 +381,7 @@ static char const * const gtk_text_domains[] = { "gtk40", "gtk30", "gtk20" };
     NSDebugLog(@"DBusMenuShortcutParser: %lu localized GTK key names for locale '%@'",
           (unsigned long)[names count], locale);
     return names;
+#endif /* MENU_HAVE_LIBINTL */
 }
 
 + (NSString *)canonicalGTKKeyName:(NSString *)name

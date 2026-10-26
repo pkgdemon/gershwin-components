@@ -6,6 +6,15 @@
 
 
 #import "DBusConnection.h"
+
+/* MENU_HAVE_DBUS is set by GNUmakefile: 0 when Menu is built without
+   libdbus (see MENU_DBUS there).  Unset means a build that predates the
+   switch, which always had libdbus. */
+#ifndef MENU_HAVE_DBUS
+#define MENU_HAVE_DBUS 1
+#endif
+
+#if MENU_HAVE_DBUS
 #import <dbus/dbus.h>
 #import <sys/select.h>
 #import <unistd.h>
@@ -1091,3 +1100,86 @@ static DBusHandlerResult gw_dbus_signal_filter(DBusConnection *connection,
 }
 
 @end
+
+#else /* !MENU_HAVE_DBUS */
+
+/* Menu built without libdbus: a session bus that is never there.  Every
+   importer that uses it already copes with a bus that cannot be reached
+   (DBusMenuImporter logs it and carries on), so Menu runs exactly as it does
+   on a session without D-Bus: GNUstep programs over Distributed Objects, GTK
+   and Qt programs through the toolkit modules. */
+@implementation GNUDBusConnection
+
++ (GNUDBusConnection *)sessionBus
+{
+    static GNUDBusConnection *sharedSessionBus = nil;
+    @synchronized(self) {
+        if (!sharedSessionBus) {
+            sharedSessionBus = [[GNUDBusConnection alloc] init];
+        }
+    }
+    return sharedSessionBus;
+}
+
+- (id)init
+{
+    self = [super init];
+    if (self) {
+        self.connection = NULL;
+        self.connected = NO;
+        self.messageHandlers = [[NSMutableDictionary alloc] init];
+    }
+    return self;
+}
+
+- (BOOL)connect
+{
+    NSDebugLLog(@"gwcomp", @"DBusConnection: Menu was built without D-Bus");
+    return NO;
+}
+
+- (void)disconnect { self.connected = NO; }
+- (BOOL)isConnected { return NO; }
+- (BOOL)registerService:(NSString *)serviceName { return NO; }
+
+- (BOOL)watchSignalsOfInterface:(NSString *)interfaceName
+                         target:(id)target
+                       selector:(SEL)selector
+{
+    return NO;
+}
+
+- (BOOL)registerObjectPath:(NSString *)objectPath
+                 interface:(NSString *)interfaceName
+                   handler:(id)handler
+{
+    return NO;
+}
+
+- (id)callMethod:(NSString *)method
+       onService:(NSString *)serviceName
+      objectPath:(NSString *)objectPath
+       interface:(NSString *)interfaceName
+       arguments:(NSArray *)arguments
+{
+    return nil;
+}
+
+- (id)callGTKActivateMethod:(NSString *)actionName
+                  parameter:(NSArray *)parameter
+               platformData:(NSDictionary *)platformData
+                  onService:(NSString *)serviceName
+                 objectPath:(NSString *)objectPath
+{
+    return nil;
+}
+
+- (void)processMessages {}
+- (BOOL)hasPendingMessages { return NO; }
+- (void *)rawConnection { return NULL; }
+- (int)getFileDescriptor { return -1; }
+- (BOOL)sendReply:(void *)reply { return NO; }
+
+@end
+
+#endif /* MENU_HAVE_DBUS */
