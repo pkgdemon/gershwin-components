@@ -6,7 +6,16 @@
 
 #import "MPRISMediaController.h"
 
+/* MENU_HAVE_DBUS is set by GNUmakefile: 0 when Menu is built without
+   libdbus (see MENU_DBUS there).  Unset means a build that predates the
+   switch, which always had libdbus. */
+#ifndef MENU_HAVE_DBUS
+#define MENU_HAVE_DBUS 1
+#endif
+
+#if MENU_HAVE_DBUS
 #import <dbus/dbus.h>
+#endif
 #import <errno.h>
 #import <fcntl.h>
 #import <string.h>
@@ -20,6 +29,8 @@ NSString * const MPRISPlayerIdentityKey = @"identity";
 NSString * const MPRISPlayerStatusKey = @"playbackStatus";
 NSString * const MPRISPlayerTitleKey = @"title";
 NSString * const MPRISPlayerArtistKey = @"artist";
+
+#if MENU_HAVE_DBUS
 
 /* MPRIS2: a player takes a bus name of the form
    org.mpris.MediaPlayer2.<instance> and answers on this object, where the
@@ -1034,3 +1045,31 @@ static DBusHandlerResult MPRISMessageFilter(DBusConnection *connection,
 }
 
 @end
+
+#else /* !MENU_HAVE_DBUS */
+
+/* Menu built without libdbus: MPRIS players live on the session bus, so
+   there are never any.  -start answers NO, as it does when the bus is not
+   there, and the media hub shows no player. */
+@implementation MPRISMediaController
+
++ (instancetype)sharedController
+{
+    static MPRISMediaController *shared = nil;
+    @synchronized(self) {
+        if (shared == nil) {
+            shared = [[MPRISMediaController alloc] init];
+        }
+    }
+    return shared;
+}
+
+- (BOOL)start { return NO; }
+- (void)stop {}
+- (NSArray<NSDictionary *> *)players { return [NSArray array]; }
+- (BOOL)sendCommand:(NSString *)method toPlayerWithBusName:(NSString *)busName { return NO; }
+- (void)requestRefresh {}
+
+@end
+
+#endif /* MENU_HAVE_DBUS */

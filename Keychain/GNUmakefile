@@ -1,6 +1,29 @@
 include $(GNUSTEP_MAKEFILES)/common.make
 GNUSTEP_INSTALLATION_DOMAIN = SYSTEM
 
+# Keychain is a Secret Service (org.freedesktop.secrets) provider: it answers
+# its clients over the D-Bus session bus, so without libdbus there is nothing
+# for it to do.  Where no libdbus is installed at all (NextBSD ships no D-Bus)
+# it is skipped with a message instead of failing the whole tree, the same way
+# Whisper and the Color pane skip.  pkg-config is what this makefile takes the
+# flags from, and an installed header keeps the old behaviour, so a broken
+# libdbus still fails loudly.
+KEYCHAIN_HAVE_DBUS := $(shell pkg-config --exists dbus-1 2>/dev/null && echo yes)
+ifneq ($(KEYCHAIN_HAVE_DBUS),yes)
+ifneq ($(wildcard /usr/include/dbus-1.0/dbus/dbus.h /usr/local/include/dbus-1.0/dbus/dbus.h),)
+KEYCHAIN_HAVE_DBUS := yes
+endif
+endif
+
+ifneq ($(KEYCHAIN_HAVE_DBUS),yes)
+
+.PHONY: all build install uninstall clean distclean check
+
+all build install uninstall clean distclean check:
+	@echo "Keychain: SKIPPED -- libdbus not found; the Secret Service needs D-Bus."
+
+else
+
 GNUSTEP_SYSTEM_APPS := $(GNUSTEP_SYSTEM_APPS)/Utilities
 GNUSTEP_LOCAL_APPS := $(GNUSTEP_LOCAL_APPS)/Utilities
 
@@ -52,3 +75,5 @@ after-clean::
 
 before-install::
 	mkdir -p $(GNUSTEP_APPS)
+
+endif

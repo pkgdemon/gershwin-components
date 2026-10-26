@@ -166,7 +166,7 @@ Menu_RESOURCE_FILES = \
 
 # Libraries and frameworks - configured by configure script
 DBUS_LIBS = @DBUS_LIBS@
-Menu_TOOL_LIBS += $(DBUS_LIBS) -lXrandr -lX11
+Menu_TOOL_LIBS += -lXrandr -lX11
 Menu_GUI_LIBS += -L/System/Library/Libraries -lgnustep-gui -lgnustep-base -lobjc -ldispatch -lSoundBackend -lNetworkBackend
 Menu_LDFLAGS += -Wl,--export-dynamic -L/System/Library/Libraries -Wl,-rpath,/System/Library/Libraries -Wl,--no-as-needed
 
@@ -174,6 +174,22 @@ Menu_LDFLAGS += -Wl,--export-dynamic -L/System/Library/Libraries -Wl,-rpath,/Sys
 
 # Platform-specific flags for Linux and BSD - configured by configure script
 UNAME_S := $(shell uname -s)
+
+# libintl (GNU gettext) is only used to read GTK's translations of key names
+# (DBusMenuShortcutParser.m). On FreeBSD it comes from a package; NextBSD's
+# base has none. Without it Menu builds with MENU_HAVE_LIBINTL=0 and the
+# shortcut parser knows the English key names only.
+ifneq ($(filter FreeBSD NextBSD,$(UNAME_S)),)
+MENU_HAVE_LIBINTL := $(shell printf '\043include <libintl.h>\nint main(void){return dgettext("a","b")==0;}\n' | \
+	$(or $(CC),cc) -x c - -o /dev/null -I/usr/local/include -L/usr/local/lib -lintl >/dev/null 2>&1 && echo yes)
+ifeq ($(MENU_HAVE_LIBINTL),yes)
+MENU_INTL_LIBS = -lintl
+else
+MENU_INTL_LIBS =
+MENU_INTL_FLAGS = -DMENU_HAVE_LIBINTL=0
+endif
+endif
+
 DBUS_CFLAGS := $(shell pkg-config --cflags dbus-1 2>/dev/null || echo "-I/usr/include/dbus-1.0 -I/usr/lib/dbus-1.0/include")
 ifeq ($(UNAME_S),Linux)
 	ADDITIONAL_OBJCFLAGS = -Wall -Wextra -O2 -fobjc-runtime=gnustep-2.0 -fobjc-arc -Wno-unused-parameter -D_GNU_SOURCE -I.
@@ -182,12 +198,12 @@ endif
 ifeq ($(UNAME_S),FreeBSD)
 	ADDITIONAL_OBJCFLAGS = -Wall -Wextra -O2 -fobjc-runtime=gnustep-2.0 -fobjc-arc -Wno-unused-parameter -D_BSD_SOURCE -I.
 	ADDITIONAL_CPPFLAGS = $(DBUS_CFLAGS)
-	Menu_TOOL_LIBS += -lexecinfo -lintl
+	Menu_TOOL_LIBS += -lexecinfo $(MENU_INTL_LIBS)
 endif
 ifeq ($(UNAME_S),NextBSD)
 	ADDITIONAL_OBJCFLAGS = -Wall -Wextra -O2 -fobjc-runtime=gnustep-2.0 -fobjc-arc -Wno-unused-parameter -D_BSD_SOURCE -I.
 	ADDITIONAL_CPPFLAGS = $(DBUS_CFLAGS)
-	Menu_TOOL_LIBS += -lexecinfo -lintl
+	Menu_TOOL_LIBS += -lexecinfo $(MENU_INTL_LIBS)
 	Menu_GUI_LIBS += -L/usr/lib/system
 	Menu_LDFLAGS += -Wl,-rpath,/usr/lib/system
 endif
@@ -197,6 +213,7 @@ ifeq ($(UNAME_S),OpenBSD)
 	Menu_TOOL_LIBS += -L/usr/local/lib -lexecinfo -lintl
 	Menu_GUI_LIBS += -lc++abi
 endif
+ADDITIONAL_OBJCFLAGS += $(MENU_INTL_FLAGS)
 
 # Profiling: build with  make PROFILE=1  to enable CPU instrumentation.
 # When enabled, a summary is printed every 10s and on SIGUSR1.
@@ -235,12 +252,40 @@ AS_NEEDED_FLAG = $(shell ld --help 2>/dev/null | grep -q -- '--as-needed' && ech
 # hear which of those it settled on.
 HAVE_LIBDBUS := $(shell CC="$(CC)" sh has-libdbus.sh "$(DBUS_CFLAGS) $(DBUS_LIBS)" 2>/dev/null)
 
+# Menu's own D-Bus side: the com.canonical.AppMenu.Registrar and dbusmenu
+# importer (Electron, Chromium and other libdbusmenu programs), the
+# org.gtk.Menus importer and MPRIS for the media keys.  GNUstep programs reach
+# Menu over Distributed Objects, and GTK and Qt programs through the toolkit
+# modules (ToolkitModules), so none of that needs D-Bus.  It is built when
+# libdbus is there.  Where no libdbus header exists at all (NextBSD, which
+# ships no D-Bus), Menu is built with MENU_HAVE_DBUS=0 instead: GNUDBusConnection
+# never connects, which is how Menu already behaves when the session has no
+# bus.  A header without a working probe keeps the old behaviour, so a
+# broken libdbus still fails the link loudly.  MENU_DBUS=no or yes on the
+# make command line overrides the choice.
+DBUS_HEADER_PRESENT := $(wildcard /usr/include/dbus-1.0/dbus/dbus.h /usr/local/include/dbus-1.0/dbus/dbus.h)
+ifeq ($(HAVE_LIBDBUS),yes)
+MENU_DBUS ?= yes
+else ifneq ($(DBUS_HEADER_PRESENT),)
+MENU_DBUS ?= yes
+else
+MENU_DBUS ?= no
+endif
+ifeq ($(MENU_DBUS),yes)
+ADDITIONAL_OBJCFLAGS += -DMENU_HAVE_DBUS=1
+Menu_TOOL_LIBS += $(DBUS_LIBS)
+else
+ADDITIONAL_OBJCFLAGS += -DMENU_HAVE_DBUS=0
+$(warning Menu: no libdbus - building without the D-Bus menu importers and MPRIS)
+endif
+
 # Every menu extra that Menu builds, and the bundle each one leaves behind,
 # in one place so that the two lists cannot disagree about what there is.
 MENU_EXTRA_DIRS = ClockExtra BatteryExtra CPUExtra RAMExtra WLANExtra SoundExtra BrightnessExtra BuildMonitorExtra
 MENU_EXTRA_BUNDLES = ClockExtra/Clock BatteryExtra/Battery CPUExtra/CPU RAMExtra/RAM \
 	WLANExtra/WLAN SoundExtra/Sound BrightnessExtra/Brightness BuildMonitorExtra/BuildMonitor
-ifeq ($(HAVE_LIBDBUS),yes)
+# The MediaExtra needs the probe to have succeeded, and Menu's D-Bus side.
+ifeq ($(HAVE_LIBDBUS)$(MENU_DBUS),yesyes)
 MENU_EXTRA_DIRS += MediaExtra
 MENU_EXTRA_BUNDLES += MediaExtra/Media
 endif

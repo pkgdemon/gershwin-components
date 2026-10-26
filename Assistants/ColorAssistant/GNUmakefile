@@ -2,6 +2,12 @@ include $(GNUSTEP_MAKEFILES)/common.make
 
 GNUSTEP_INSTALLATION_DOMAIN = SYSTEM
 
+# lcms2 builds the ICC profiles (ProfileGenerator.m).  If it is absent the
+# assistant is skipped, like the Color pane (Color/GNUmakefile).
+HAVE_LCMS2 := $(shell pkg-config --exists lcms2 2>/dev/null && echo yes || echo no)
+
+ifeq ($(HAVE_LCMS2),yes)
+
 GNUSTEP_SYSTEM_APPS := $(GNUSTEP_SYSTEM_APPS)/Utilities
 GNUSTEP_LOCAL_APPS := $(GNUSTEP_LOCAL_APPS)/Utilities
 
@@ -35,3 +41,12 @@ after-all::
 	@if [ "$$(uname -s)" = "OpenBSD" ]; then rm -rf $(APP_NAME).app/Frameworks/GSAssistantFramework.framework; fi
 	@cp -R ../AssistantFramework/GSAssistantFramework.framework $(APP_NAME).app/Frameworks/
 	@echo "Framework embedded in $(APP_NAME).app/Frameworks/"
+
+else
+
+.PHONY: all build install uninstall clean distclean
+
+all build install uninstall clean distclean:
+	@echo "ColorAssistant: lcms2 not found, skipping"
+
+endif

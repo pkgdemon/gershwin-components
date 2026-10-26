@@ -46,6 +46,7 @@ static const double kMinScrollSpeed = 0.25;
     [candidates addObjectsFromArray:@[
         @"/usr/bin/xinput",
         @"/usr/local/bin/xinput",
+        @"/usr/X11/bin/xinput",
         @"/usr/X11R6/bin/xinput",
         @"/usr/pkg/bin/xinput",
     ]];

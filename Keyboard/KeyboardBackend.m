@@ -6,6 +6,8 @@
 
 #import "KeyboardBackend.h"
 
+/* NextBSD ships setxkbmap in its base system, in /usr/X11. */
+static NSString *const kSetxkbmapX11 = @"/usr/X11/bin/setxkbmap";
 static NSString *const kSetxkbmapLocal = @"/usr/local/bin/setxkbmap";
 static NSString *const kSetxkbmapSystem = @"/usr/bin/setxkbmap";
 
@@ -14,7 +16,7 @@ static NSString *const kSetxkbmapSystem = @"/usr/bin/setxkbmap";
 + (NSString *)findSetxkbmap
 {
     NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *path in @[kSetxkbmapLocal, kSetxkbmapSystem]) {
+    for (NSString *path in @[kSetxkbmapX11, kSetxkbmapLocal, kSetxkbmapSystem]) {
         if ([fm isExecutableFileAtPath:path]) {
             return path;
         }

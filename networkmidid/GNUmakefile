@@ -64,9 +64,16 @@ ADDITIONAL_OBJCFLAGS += -fobjc-arc -Wall -Wextra -Wno-unused-parameter
 
 # The MIDI port layer is the ALSA sequencer, through alsa-seq-server on the
 # BSDs.  OpenBSD has no ALSA; networkmidid builds there but reports that it has
-# no port layer until the sndio one exists.
+# no port layer until the sndio one exists.  The same goes for a system without
+# alsa-lib installed (NextBSD's base has none): the header is probed for, and
+# without it networkmidid is built as on OpenBSD.
+NMD_ALSA_HEADER := $(shell printf '\043include <alsa/asoundlib.h>\n' | \
+	$(or $(CC),cc) -I/usr/local/include -x c -E - >/dev/null 2>&1 && echo yes)
 ifeq ($(UNAME_S),OpenBSD)
 ADDITIONAL_OBJCFLAGS += -DNMD_HAVE_ALSA=0
+else ifneq ($(NMD_ALSA_HEADER),yes)
+ADDITIONAL_OBJCFLAGS += -DNMD_HAVE_ALSA=0
+$(warning networkmidid: alsa/asoundlib.h not found - building without the ALSA sequencer port layer)
 else
 ADDITIONAL_OBJCFLAGS += -DNMD_HAVE_ALSA=1
 networkmidid_TOOL_LIBS += -lasound

@@ -106,7 +106,10 @@ echo "DBUS_LIBS: $DBUS_LIBS"
 if test_compile "$DBUS_CFLAGS" "$DBUS_LIBS"; then
     echo "DBUS configuration test passed"
 else
-    echo "Error: DBUS is required but not found or not working"
+    echo "Warning: DBUS not found or not working."
+    echo "Menu will be built without its D-Bus side (the dbusmenu, org.gtk.Menus"
+    echo "and MPRIS importers) when no libdbus header is installed at all; see"
+    echo "MENU_DBUS in GNUmakefile.in. To build it with D-Bus:"
     echo ""
     case "$OS" in
         Linux)
@@ -128,7 +131,6 @@ else
             ;;
     esac
     echo ""
-    exit 1
 fi
 
 # Generate GNUmakefile from GNUmakefile.in

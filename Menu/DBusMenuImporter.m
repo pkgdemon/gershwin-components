@@ -15,7 +15,15 @@
 #import "MenuUtils.h"
 #import "AppMenuWidget.h"
 #import "MenuProfiler.h"
+/* MENU_HAVE_DBUS is set by GNUmakefile: 0 when Menu is built without
+   libdbus (see MENU_DBUS there).  Unset means a build that predates the
+   switch, which always had libdbus. */
+#ifndef MENU_HAVE_DBUS
+#define MENU_HAVE_DBUS 1
+#endif
+#if MENU_HAVE_DBUS
 #import <dbus/dbus.h>
+#endif
 #import <dispatch/dispatch.h>
 
 // Forward declare the sendReply method to avoid header issues
@@ -717,6 +725,10 @@
 // DBus method handlers
 - (void)handleDBusMethodCall:(NSDictionary *)callInfo
 {
+#if !MENU_HAVE_DBUS
+    /* Only a bus delivers method calls, and without libdbus there is none. */
+    (void)callInfo;
+#else
     MENU_PROFILE_BEGIN(handleDBusMethodCall);
 
     NSString *method = [callInfo objectForKey:@"method"];
@@ -839,6 +851,7 @@
     }
 
     MENU_PROFILE_END(handleDBusMethodCall);
+#endif /* MENU_HAVE_DBUS */
 }
 
 - (void)handleRegisterWindow:(NSArray *)arguments
