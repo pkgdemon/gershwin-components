@@ -25,6 +25,19 @@ static NSString *const kChargeStartThresholdPath =
    points is the gap every other desktop offers. */
 static const int kChargeResumeGap = 5;
 
+/* xset is /usr/bin/xset on Linux, in /usr/local/bin from FreeBSD packages and
+   in /usr/X11/bin in NextBSD's base system. */
+static NSString *EnergyXsetPath(void)
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *path in @[@"/usr/bin/xset", @"/usr/X11/bin/xset", @"/usr/local/bin/xset"]) {
+        if ([fm isExecutableFileAtPath:path]) {
+            return path;
+        }
+    }
+    return @"/usr/bin/xset";
+}
+
 @implementation EnergyBackend
 
 + (NSString *)readFile:(NSString *)path
@@ -468,7 +481,7 @@ static const int kChargeResumeGap = 5;
 
 + (int)currentScreenBlankSeconds
 {
-    NSString *xsetOut = [self runCommand:@"/usr/bin/xset" args:@[@"q"]];
+    NSString *xsetOut = [self runCommand:EnergyXsetPath() args:@[@"q"]];
     if ([xsetOut rangeOfString:@"DPMS is Enabled"].location == NSNotFound) {
         return 0;
     }
@@ -485,11 +498,11 @@ static const int kChargeResumeGap = 5;
 {
     // DPMS: xset dpms <standby> <suspend> <off>
     NSString *blankStr = (seconds > 0) ? [NSString stringWithFormat:@"%d", seconds] : @"0";
-    [self runCommand:@"/usr/bin/xset" args:@[@"dpms", blankStr, blankStr, blankStr]];
+    [self runCommand:EnergyXsetPath() args:@[@"dpms", blankStr, blankStr, blankStr]];
     if (seconds == 0) {
-        [self runCommand:@"/usr/bin/xset" args:@[@"-dpms"]];
+        [self runCommand:EnergyXsetPath() args:@[@"-dpms"]];
     } else {
-        [self runCommand:@"/usr/bin/xset" args:@[@"+dpms"]];
+        [self runCommand:EnergyXsetPath() args:@[@"+dpms"]];
     }
     return [self currentScreenBlankSeconds] == seconds;
 }
