@@ -24,6 +24,7 @@
 #import "DUPartitionTableParser.h"
 #import "DUStorageBackend.h"
 #import "DUStorageCapabilities.h"
+#import "DUFATFormat.h"
 #import "DUStorageDevice.h"
 #import "DUStorageManager.h"
 #import "DUStorageObject.h"
@@ -63,6 +64,10 @@ static NSString *const kDefaultsConfirmDestructive =
 @property (nonatomic, strong) NSButton *applyButton;
 
 @property (nonatomic, weak) DUStorageDevice *device;
+// A rescan replaces the model objects and the weak device above goes nil
+// with the old snapshot; the identifier still tells a refresh of the shown
+// disk apart from the selection of another one.
+@property (nonatomic, copy) NSString *deviceIdentifier;
 @property (nonatomic, strong) DUPartitionLayout *layout;
 
 // Baseline snapshot taken at refresh time. The layout cannot restore its
@@ -375,12 +380,17 @@ static NSString *const kDefaultsConfirmDestructive =
     DUStorageDevice *device = (object != nil &&
         object.type == DUStorageObjectTypeDevice)
         ? (DUStorageDevice *)object : nil;
-    if (_layout != nil && _layout.hasPendingChanges && device != nil &&
-            _device != nil &&
-            [device.identifier isEqualToString:_device.identifier]) {
+    BOOL sameDevice = device != nil &&
+        [device.identifier isEqualToString:_deviceIdentifier];
+    if (_layout != nil && _layout.hasPendingChanges && sameDevice) {
         _device = device;
         return;
     }
+    // The partition the user was looking at stays chosen across a refresh
+    // of the same disk; syncAllViews falls back to the first one if it is
+    // gone.
+    NSInteger keptIndex = sameDevice ? _selectedIndex : -1;
+    _deviceIdentifier = [device.identifier copy];
 
     if (device != nil && device.capacityBytes > 0) {
         _device = device;
@@ -417,7 +427,7 @@ static NSString *const kDefaultsConfirmDestructive =
         _committedPartitions = @[];
     }
 
-    _selectedIndex = -1;
+    _selectedIndex = keptIndex;
     [self syncAllViews];
 }
 
@@ -548,8 +558,6 @@ static NSString *const kDefaultsConfirmDestructive =
         ? selected.name
         : (selected.displayName ?: @"");
 
-    [self rebuildFormatPopupForFilesystem:selected.filesystemType];
-
     unsigned long long shownSize = selected.sizeBytes;
     if (_mapView.layout != nil && _mapView.selectedPartitionIndex ==
             _selectedIndex) {
@@ -563,12 +571,17 @@ static NSString *const kDefaultsConfirmDestructive =
     }
     _sizeValue.stringValue =
         [DUParsing humanReadableSizeFromBytes:shownSize];
+    [self rebuildFormatPopupForFilesystem:selected.filesystemType
+                                sizeBytes:shownSize];
 }
 
 // Format choices come from the backend for the whole device; the matching
 // entry is preselected for the chosen filesystem (SPEC section 17).
 - (void)rebuildFormatPopupForFilesystem:(NSString *)filesystemType
+                             sizeBytes:(unsigned long long)sizeBytes
 {
+    // A partition read from disk says "vfat"; the popup offers FAT32.
+    filesystemType = [DUFATFormat canonicalIdentifier:filesystemType];
     [_formatPopup removeAllItems];
     if (_device == nil) {
         return;
@@ -586,7 +599,10 @@ static NSString *const kDefaultsConfirmDestructive =
                    action:nil
             keyEquivalent:@""];
         item.representedObject = format[kDUFormatIdentifierKey];
-        item.enabled = [format[kDUFormatCanFormatKey] boolValue];
+        // The bounds apply to this partition, not to the whole device the
+        // backend described the formats for.
+        item.enabled = [format[kDUFormatCanFormatKey] boolValue] &&
+            [DUFATFormat descriptor:format allowsBytes:sizeBytes];
         [_formatPopup.menu addItem:item];
         NSInteger position = (NSInteger)_formatPopup.itemArray.count - 1;
         if ([item isEnabled] && firstEnabled < 0) {

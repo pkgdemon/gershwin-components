@@ -11,7 +11,7 @@ if [ -f /System/Library/Makefiles/GNUstep.sh ]; then
     . /System/Library/Makefiles/GNUstep.sh
 fi
 
-TOOLS="t_Parsing t_PartitionLayout t_Models t_MockBackend t_SHA256 t_Libraries"
+TOOLS="t_Parsing t_PartitionLayout t_Models t_MockBackend t_SHA256 t_Libraries t_FATFormat t_LinuxDiscovery t_PartitionTypeNames"
 
 gmake || exit 2
 
@@ -57,6 +57,33 @@ if [ -d Manager ]; then
             status=1
         fi
     fi
+fi
+
+# Tests/Panes builds real AppKit views and so needs an X display. It never
+# falls back to $DISPLAY, which is usually the user's own desktop: name a
+# private Xvfb explicitly, e.g. DU_TEST_DISPLAY=:98 sh run.sh
+if [ -n "$DU_TEST_DISPLAY" ] && [ -d Panes ]; then
+    (cd Panes && gmake) || status=1
+    for tool in t_PaneChoices t_DeviceBrowser t_WakeFlows; do
+        binary="./Panes/obj/$tool"
+        if [ ! -x "$binary" ]; then
+            echo "$tool: MISSING BINARY"
+            status=1
+            continue
+        fi
+        output=$(DISPLAY="$DU_TEST_DISPLAY" "$binary" -GSTheme GNUstep 2>&1)
+        code=$?
+        passed=$(printf '%s\n' "$output" | grep -c '^Passed test:')
+        failed=$(printf '%s\n' "$output" | grep -c '^Failed test:')
+        crashed=$(printf '%s\n' "$output" | grep -c 'Uncaught exception')
+        echo "$tool: $passed passed, $failed failed, $crashed uncaught"
+        if [ "$failed" -ne 0 ] || [ "$crashed" -ne 0 ] || [ "$code" -ne 0 ]; then
+            printf '%s\n' "$output" | grep -E '^Failed test:|Uncaught exception'
+            status=1
+        fi
+    done
+else
+    echo "t_PaneChoices, t_DeviceBrowser, t_WakeFlows: skipped (set DU_TEST_DISPLAY to a private X display)"
 fi
 
 exit $status

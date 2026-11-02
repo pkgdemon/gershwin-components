@@ -21,6 +21,9 @@
 #import "DUStorageManager.h"
 #import "DUStorageObject.h"
 #import "DUNotifications.h"
+#import "DUFATFormat.h"
+#import "DUPartition.h"
+#import "DUStorageVolume.h"
 #import "DUStorageDevice.h"
 
 static NSString * const kDefaultsConfirmDestructive =
@@ -39,7 +42,14 @@ static NSString * const kDefaultsConfirmDestructive =
 @property (nonatomic, strong) NSButton *eraseButton;
 
 @property (nonatomic, weak) DUStorageObject *currentObject;
-@property (nonatomic, assign) NSString *selectedSecurityMethod;
+// Every rescan replaces the model objects, so the weak reference above goes
+// nil while the user still looks at the same disk; the identifier tells a
+// refresh of that disk apart from a selection of another one.
+@property (nonatomic, copy) NSString *currentIdentifier;
+// The name this pane filled in itself; anything else in the field was typed
+// by the user and must survive a refresh.
+@property (nonatomic, copy) NSString *prefilledName;
+@property (nonatomic, copy) NSString *selectedSecurityMethod;
 @property (nonatomic, assign) BOOL operationRunning;
 @property (nonatomic, strong) NSArray<NSButton *> *pendingSecurityRadios;
 @end
@@ -146,7 +156,9 @@ static NSString * const kDefaultsConfirmDestructive =
 - (void)operationDidUpdate:(NSNotification *)note
 {
     DUStorageObject *target = note.userInfo[kDUUserInfoObjectKey];
-    if (target != nil && target == self.currentObject) {
+    // By identifier: a rescan during the erase replaces the instance.
+    if (target != nil &&
+        [target.identifier isEqualToString:self.currentIdentifier]) {
         NSString *message = [note.userInfo[kDUUserInfoOperationKey] message];
         [self.logView appendLine:message ?: @""];
     }
@@ -155,7 +167,9 @@ static NSString * const kDefaultsConfirmDestructive =
 - (void)operationDidFinish:(NSNotification *)note
 {
     DUStorageObject *target = note.userInfo[kDUUserInfoObjectKey];
-    if (target != nil && target == self.currentObject) {
+    // By identifier: a rescan during the erase replaces the instance.
+    if (target != nil &&
+        [target.identifier isEqualToString:self.currentIdentifier]) {
         [self operationFinished:note.userInfo[kDUUserInfoErrorKey]];
     }
 }
@@ -216,7 +230,15 @@ static NSString * const kDefaultsConfirmDestructive =
 - (void)refreshForObject:(DUStorageObject *)object
             capabilities:(DUStorageCapabilities *)capabilities
 {
+    BOOL sameObject = object != nil &&
+        [object.identifier isEqualToString:self.currentIdentifier];
+    NSString *chosenFormat =
+        sameObject ? _formatPopup.selectedItem.representedObject : nil;
+    BOOL nameEdited = sameObject &&
+        ![_nameField.stringValue isEqualToString:self.prefilledName ?: @""];
+
     self.currentObject = object;
+    self.currentIdentifier = object.identifier;
 
     [_formatPopup removeAllItems];
     if (object != nil) {
@@ -227,25 +249,49 @@ static NSString * const kDefaultsConfirmDestructive =
         // auto-enable them.
         _formatPopup.menu.autoenablesItems = NO;
         NSInteger firstEnabled = -1;
+        unsigned long long targetBytes = 0;
+        if ([object isKindOfClass:[DUStorageDevice class]]) {
+            targetBytes = ((DUStorageDevice *)object).capacityBytes;
+        } else if ([object isKindOfClass:[DUPartition class]]) {
+            targetBytes = ((DUPartition *)object).sizeBytes;
+        } else if ([object isKindOfClass:[DUStorageVolume class]]) {
+            targetBytes = ((DUStorageVolume *)object).capacityBytes;
+        }
         for (NSDictionary *format in formats) {
             NSMenuItem *item = [[NSMenuItem alloc]
                 initWithTitle:format[kDUFormatDisplayNameKey]
                        action:nil
                 keyEquivalent:@""];
             item.representedObject = format[kDUFormatIdentifierKey];
-            item.enabled = [format[kDUFormatCanFormatKey] boolValue];
+            // FAT16 is greyed out for a target it cannot hold, like a
+            // filesystem whose tool is missing.
+            item.enabled = [format[kDUFormatCanFormatKey] boolValue] &&
+                [DUFATFormat descriptor:format allowsBytes:targetBytes];
             [_formatPopup.menu addItem:item];
             if ([item isEnabled] && firstEnabled < 0) {
                 firstEnabled = (NSInteger)_formatPopup.itemArray.count - 1;
             }
         }
-        if (firstEnabled >= 0) {
+        // The default applies only when the user's choice is gone, e.g.
+        // because the tool for that filesystem disappeared.
+        // A choice made as "vfat" before FAT32 and FAT16 were told apart.
+        chosenFormat = [DUFATFormat canonicalIdentifier:chosenFormat];
+        NSInteger chosen = chosenFormat != nil
+            ? [_formatPopup indexOfItemWithRepresentedObject:chosenFormat]
+            : -1;
+        if (chosen >= 0 && [[_formatPopup itemAtIndex:chosen] isEnabled]) {
+            [_formatPopup selectItemAtIndex:chosen];
+        } else if (firstEnabled >= 0) {
             [_formatPopup selectItemAtIndex:firstEnabled];
         }
 
         // Prefill with the current display name; users usually keep it.
-        _nameField.stringValue = object.displayName ?: @"";
+        if (!nameEdited) {
+            self.prefilledName = object.displayName ?: @"";
+            _nameField.stringValue = self.prefilledName;
+        }
     } else {
+        self.prefilledName = @"";
         _nameField.stringValue = @"";
     }
 
@@ -369,6 +415,21 @@ static NSString * const kDefaultsConfirmDestructive =
     DUStorageObject *object = self.currentObject;
     NSString *formatIdentifier = _formatPopup.selectedItem.representedObject;
     if (object == nil || formatIdentifier == nil || self.operationRunning) {
+        return;
+    }
+    // Started before the confirmation, so it names the disk as it really is.
+    if ([self.storageManager objectNeedsWake:object]) {
+        [self.logView appendLine:NSLocalizedString(@"Starting the disk...", nil)];
+        [self.storageManager wakeObject:object
+                             completion:^(DUStorageObject *fresh,
+                                          NSError *error) {
+            if (fresh == nil) {
+                [self.logView appendLine:error.localizedDescription ?: @""];
+                return;
+            }
+            self.currentObject = fresh;
+            [self eraseClicked:sender];
+        }];
         return;
     }
 
